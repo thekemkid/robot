@@ -1,0 +1,15 @@
+{
+  "name": "cocktail-robot",
+  "version": "0.0.1",
+  "description": "A robot that does cocktails",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "mqtt": "^1.3.5",
+    "raspi-io": "^3.3.5"
+  }
+}
