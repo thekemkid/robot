@@ -25,33 +25,46 @@ var machines = [
 
 initMachines();
 
-mqtt.subscribe('pi1');
-mqtt.publish('connections', JSON.stringify({status: 'worker connected', worker: worker}));
-//mqtt.publish(worker, JSON.stringify({worker: worker, status: 'ready'}));
+mqtt.subscribe(worker);
+
+mqtt.publish('connections', JSON.stringify({status: 'worker here', worker: worker}));
+var connectionsInterval = setInterval(function(){
+  mqtt.publish('connections', JSON.stringify({status: 'worker here', worker: worker}));
+}, 10000);
 
 mqtt.on('message', function(topic, message) {
+
   console.log(message.toString());
 
   message = JSON.parse(message.toString());
-  if (message.jobs) {
-    console.log('received jobs' + JSON.stringify(message.jobs, null, 2));
+
+  if(message.status === 'new jobs') handleJobs(message.jobs)
+  if(message.status === 'ping') mqtt.publish('connections', JSON.stringify({status: 'worker here', worker: worker}));
+  
+});
+
+function handleJobs(jobs){
+  if (jobs) {
+    console.log('received jobs' + JSON.stringify(jobs, null, 2));
+
     //if both machines are ready to accept jobs
-    if (machines.every(function(machine) { return machine.ready })) {
+    if (machines.every(function machineReady(m) { return m.ready })) {
       var finishedJobs = 0;
-      message.jobs.forEach(function(job) {
+
+      jobs.forEach(function(job) {
         machines[job.pump].runJob(job, function(){
           finishedJobs++;
         });
       });
 
       when(function(){return finishedJobs === 2}, function(){
-        console.log('machines for worker (' + worker + ') finished jobs:', message.jobs);
+        console.log('machines for worker (' + worker + ') finished jobs:', jobs);
         
         mqtt.publish(worker, JSON.stringify({worker: worker, status: 'ready'}));
       });
     }
   }
-});
+}
 
 function initMachines() {
   machines.forEach(function (machine) {

@@ -1,4 +1,5 @@
 var mqtt = require('mqtt').connect('mqtt://localhost:2048');
+var chalk = require('chalk');
 var Controller = require('@matteo.collina/cocktail-control');
 var level = require('level')
 var tmp = require('tmp')
@@ -44,52 +45,82 @@ var dir = tmp.dirSync()
 var db = level(dir.name)
 var controller = Controller(db, defs)
 
-var workers = {};
+var connectedWorkers = {};
 
 mqtt.on('connect', function() {
   mqtt.subscribe('connections');
 
-  mqtt.publish('connections', {status: 'server connected'});
+  Object.keys(defs.workers).forEach(function(key, index){
+    mqtt.publish(key, JSON.stringify({status: 'ping'}));
+  });
+
+  logging('Server up!')
 })
 
 mqtt.on('message', function(topic, message) {
 
+  logging(chalk.blue('(topic: '+topic+') ') + chalk.white(message.toString()));
+
   message = JSON.parse(message);
-  console.log('(Topic: '+topic+') Server received message', message);
 
   if(topic === 'connections') handleConnectionsTopicMessages();
-  else handleOtherTopid();
+  else handleOtherTopic();
 
   function handleConnectionsTopicMessages(){
-    if(status === 'worker connected'){
-      mqtt.subscribe(message.worker); // subscribe to the worker
-      mqtt.publish(message.worker, JSON.stringify({status: 'enquiring'}));
+    if(message.status === 'worker here'){
+      if(!connectedWorkers[message.worker]) workerConnected(message.worker);
 
-      // controller emitted some jobs for the worker
-      controller.on(message.worker, function(executables){
-        mqtt.publish(message.worker, JSON.stringify({jobs:executables}));
-      });
+      resetWorkerDisconnectTimeout(message.worker);
     }
   }
 
   function handleOtherTopic(){
     var worker = topic;
-    if(status === 'ready'){
-      console.log('worker ('+worker+') is ready');
+
+    if(!connectedWorkers[worker]) workerConnected(worker);
+    resetWorkerDisconnectTimeout(worker);
+
+    if(message.status === 'ready'){
+      logging('worker ('+worker+') is ready');
       setTimeout(function(){
         controller.free(worker);
       }, 1456);
     }
-    if(status === 'not ready'){
+    if(message.status === 'not ready'){
       //wait
     }
-    if(status === 'button pressed'){
+    if(message.status === 'button pressed'){
       controller.free(worker);
     }
   }
-})
+});
 
+function workerConnected(worker){
+  connectedWorkers[worker] = {};
 
+  mqtt.subscribe(worker); // subscribe to the worker
+  
+  // controller emitted some jobs for the worker
+  controller.on(worker, function(executables){
+    mqtt.publish(worker, JSON.stringify({status: 'new jobs', jobs:executables}));
+  });
+}
+
+function resetWorkerDisconnectTimeout(worker){
+  if(connectedWorkers[worker].disconnectTimeout){
+    clearTimeout(connectedWorkers[worker].disconnectTimeout);
+  }
+
+  connectedWorkers[worker].disconnectTimeout = setTimeout(function(){
+    logging(chalk.red('Worker disconnected:') + worker);
+    mqtt.unsubscribe(worker);
+    delete connectedWorkers[worker];
+  }, 30000) 
+}
+
+function logging(str){
+  console.log(chalk.green(new Date().toString()), chalk.white(str));
+}
 
 controller.enqueue({
   cocktail: 'spritz',
