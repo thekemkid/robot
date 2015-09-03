@@ -9,7 +9,7 @@ var cocktails = {
     activations: [
       2000, // milleseconds
       1000,
-      5000
+      3000
     ]
   },
   spritz: {

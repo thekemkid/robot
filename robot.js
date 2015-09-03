@@ -30,7 +30,6 @@ mqtt.publish('connections', JSON.stringify({status: 'worker connected', worker: 
 //mqtt.publish(worker, JSON.stringify({worker: worker, status: 'ready'}));
 
 mqtt.on('message', function(topic, message) {
-
   console.log(message.toString());
 
   message = JSON.parse(message.toString());
