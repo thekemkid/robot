@@ -29,9 +29,11 @@ board.on('ready', function () {
   mqtt.subscribe('pi1');
 
   var pin = 'GPIO4'
-  var button = new five.Pin(pin);
+  var button = new five.Pin(pin, {
+    mode: 0
+  });
 
-  button.read(pin, function(error, value) {
+  button.read(function(error, value) {
     console.log(value);
   });
 
