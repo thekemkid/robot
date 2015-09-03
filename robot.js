@@ -1,11 +1,12 @@
-var Raspi = require('raspi-io')
-var five = require('johnny-five')
-var raspi = new Raspi()
-var board = new five.Board({
-  io: raspi
-})
-var worker = 'pi1'
-var mqtt;
+//var Raspi = require('raspi-io')
+//var five = require('johnny-five')
+//var raspi = new Raspi()
+//var board = new five.Board({
+//  io: raspi
+//})
+var worker = process.argv[2] || 'default';
+var mqtt = require('mqtt').connect('mqtt://localhost:2048');
+var when = require('when-conditional');
 
 var machines = [
   {
@@ -22,45 +23,48 @@ var machines = [
   }
 ];
 
-board.on('ready', function () {
+initMachines();
 
-  mqtt = require('mqtt').connect('mqtt://192.168.1.83:2048');
-  initMachines();
-  mqtt.subscribe('pi1');
+mqtt.subscribe('pi1');
+mqtt.publish('connections', JSON.stringify({status: 'worker connected', worker: worker}));
+//mqtt.publish(worker, JSON.stringify({worker: worker, status: 'ready'}));
 
-  var pin = 'GPIO4'
-  var button = new five.Button(pin);
+mqtt.on('message', function(topic, message) {
 
-  button.on('down', function () {
-    console.log('DOWN!')
-  })
+  console.log(message.toString());
 
-  this.repl.inject({
-    machines: machines,
-    button: button
-  });
-
-  mqtt.publish(worker, JSON.stringify({worker: worker, status: 'ready'}));
-
-  mqtt.on('message', function(topic, message) {
-    console.log(message.toString());
-    message = JSON.parse(message.toString());
-    if (message.jobs) {
-      console.log('received jobs' + JSON.stringify(message.jobs, null, 2));
-      //if both machines are ready to accept jobs
-      if (machines.every(function(machine) { return machine.ready })) {
-        message.jobs.forEach(function(job) {
-          machines[job.pump].runJob(job)
+  message = JSON.parse(message.toString());
+  if (message.jobs) {
+    console.log('received jobs' + JSON.stringify(message.jobs, null, 2));
+    //if both machines are ready to accept jobs
+    if (machines.every(function(machine) { return machine.ready })) {
+      var finishedJobs = 0;
+      message.jobs.forEach(function(job) {
+        machines[job.pump].runJob(job, function(){
+          finishedJobs++;
         });
-      }
+      });
+
+      when(function(){return finishedJobs === 2}, function(){
+        console.log('machines for worker (' + worker + ') finished jobs:', message.jobs);
+        
+        mqtt.publish(worker, JSON.stringify({worker: worker, status: 'ready'}));
+      });
     }
-  });
-})
+  }
+});
 
 function initMachines() {
-  machines.forEach(function(machine) {
+  machines.forEach(function (machine) {
     machine.pins = machine.ports.reduce(function (acc, port) {
-      var pin = new five.Pin(port)
+      var pin = {
+        high: function(){
+          console.log('pin high for port:', port);
+        },
+        low: function(){
+          console.log('pin low for port:', port);
+        }  
+      }
       acc[port] = pin
       return acc
     }, {})
@@ -81,9 +85,12 @@ function initMachines() {
       })
     }
 
-    machine.runJob = function(job) {
+    machine.runJob = function(job, cb) {
       var machine = this;
-      this.ready = false;
+
+      machine.ready = false;
+
+      var finished = 0;
       console.log('running job on machine', machine.id)
       mqtt.publish(worker, JSON.stringify({status: 'running job on machine ' + machine.id}));
       
@@ -94,8 +101,14 @@ function initMachines() {
 
         setTimeout(function() {
           pin.low();
-          this.ready = true;
+          finished++;
         }, job.activations[index])
+      })
+
+      when(function(){return finished === 3;}, function(){
+        machine.ready = true
+        console.log('machine (' + machine.id + ') finished job:', job);
+        cb();
       })
     }
   })
