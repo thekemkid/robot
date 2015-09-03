@@ -6,64 +6,71 @@ var board = new five.Board({
 })
 var num = 1
 
-/*var ports = [
+var ports = [
   'GPIO18',
   'GPIO27',
   'GPIO22',
   'GPIO23',
   'GPIO24',
   'GPIO9'
-]*/
-
-var ports = [
-  'GPIO24',
-  'GPIO9',
-  'GPIO18'
 ]
 
-var machine2 = [
-  'GPIO22',
-  'GPIO23',
-  'GPIO27'
-]
+var machines = [
+  {
+    ports: ['GPIO24', 'GPIO9', 'GPIO18'],
+    ready: false,
+    pins: {}
+  },
+  {
+    ports : ['GPIO22', 'GPIO23', 'GPIO27'],
+    ready: false,
+    pins: {}
+  }
+];
 
 var mqtt = require('mqtt').connect('mqtt://test.mosca.io')
 
 board.on('ready', function () {
 
-  var pins = ports.reduce(function (acc, port) {
-    var pin = new five.Pin(port)
-    acc[port] = pin
-    return acc
-  }, {})
+  machines.forEach(function(machine) {
+    machine.pins = machine.ports.reduce(function (acc, port) {
+      var pin = new five.Pin(port)
+      acc[port] = pin
+      return acc
+    }, {})
 
-  console.log(pins);
+    machine.reset = function () {
+      this.ports.forEach(function (port) {
+        var pin = this.pins[port]
+        pin.low()
+      })
 
-  pins.reset = reset
-  pins.startAll = startAll
-  pins.mqtt = mqtt
+      mqtt.publish('cocktail/' + num + '/status', 'online')
+    }
+  
+    machine.start = function () {
+      this.ports.forEach(function (port) {
+        var pin = this.pins[port]
+        pin.high()
+      })
+    }
+  });
 
   reset()
 
-  mqtt.subscribe('cocktail/' + num + '/startAll')
-
-  mqtt.on('message', startAll)
-
-  this.repl.inject(pins)
+  this.repl.inject(machines);
 
   function reset () {
-    ports.forEach(function (port) {
-      var pin = pins[port]
-      pin.low()
-    })
+    machines.forEach(function (machine) {
+      machine.reset();
+    });
 
     mqtt.publish('cocktail/' + num + '/status', 'online')
   }
 
   function startAll () {
-    ports.forEach(function (port) {
-      var pin = pins[port]
-      pin.high()
+    machines.forEach(function (machine) {
+      machine.start();
     })
 
     setTimeout(reset, 60000)
