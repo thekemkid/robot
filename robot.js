@@ -35,10 +35,21 @@ board.on('ready', function () {
     console.log('DOWN!')
   })
 
+  var light = new five.Pin('GPIO7')
+
+  light.high()
+
+  setTimeout(function () {
+    light.low()
+  }, 5000)
+
+
   this.repl.inject({
     machines: machines,
     button: button
   });
+
+
 
   mqtt.publish(worker, JSON.stringify({worker: worker, status: 'ready'}));
 
