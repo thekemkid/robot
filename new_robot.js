@@ -28,8 +28,16 @@ board.on('ready', function () {
   initMachines();
   mqtt.subscribe('pi1');
 
+
+  var button = new five.Pin('GPIO4');
+
+  button.read(pin, function(error, value) {
+    console.log(value);
+  });
+
   this.repl.inject({
-    machines: machines
+    machines: machines,
+    button: button
   });
 
   mqtt.publish(worker, JSON.stringify({worker: worker, status: 'ready'}));
@@ -77,7 +85,7 @@ function initMachines() {
       var machine = this;
       this.ready = false;
       console.log('running job on machine', machine.id)
-      mqtt.publish(worker, JSON.stringify({status: 'run job on machine ' + machine.id}));
+      mqtt.publish(worker, JSON.stringify({status: 'running job on machine ' + machine.id}));
       
 
       machine.ports.forEach(function(port, index) {
