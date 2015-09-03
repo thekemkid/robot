@@ -29,13 +29,11 @@ board.on('ready', function () {
   mqtt.subscribe('pi1');
 
   var pin = 'GPIO4'
-  var button = new five.Pin(pin, {
-    mode: 0
-  });
+  var button = new five.Button(pin);
 
-  button.read(function(error, value) {
-    console.log(value);
-  });
+  button.on('down', function () {
+    console.log('DOWN!')
+  })
 
   this.repl.inject({
     machines: machines,
