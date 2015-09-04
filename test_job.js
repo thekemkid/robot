@@ -2,31 +2,30 @@ var mqtt = require('mqtt').connect('mqtt://localhost:2048');
 var chalk = require('chalk');
 var Controller = require('@matteo.collina/cocktail-control');
 var level = require('level')
-var tmp = require('tmp')
 var parallel = require('fastparallel')();
 var EE = require('events').EventEmitter;
 var mqttToSocketIoEE = new EE();
 
 var cocktails = {
-  bloody: {
+  rumAndCoke: {
     activations: [
-      {drink: 'vodka', time: 2000}, // milleseconds
-      {drink: 'rum', time: 1000},
-      {drink: 'coke', time: 4000}
+      {drink: 'coke', time: 60000}, // milleseconds
+      {drink: 'coke', time: 60000},
+      {drink: 'rum', time: 20000}
     ]
   },
-  spritz: {
+  seabreeze: {
     activations: [
-      {drink: 'vodka', time: 4000}, // milleseconds
-      {drink: 'whiskey', time: 8000},
-      {drink: 'rum', time: 12000}
+      {drink: 'vodka', time: 60000}, // milleseconds
+      {drink: 'cranberry', time: 60000},
+      {drink: 'pineapple', time: 120000}
     ]
   },
-  vodka: {
+  crazy: {
     activations: [
-      {drink: 'vodka', time: 2000}, // milleseconds
-      {drink: 'vodka', time: 4000},
-      {drink: 'vodka', time: 2000}
+      {drink: 'whiskey', time: 60000}, // milleseconds
+      {drink: 'pineapple', time: 60000},
+      {drink: 'coke', time: 160000}
     ]
   }
 }
@@ -35,7 +34,7 @@ var defs = {
   cocktails: cocktails,
   workers: {
     pi1: {
-      cocktails: ['bloody', 'spritz'] //cocktails a worker can make
+      cocktails: ['crazy'] //cocktails a worker can make
     },
     pi2: {
       cocktails: ['vodka', 'spritz']
@@ -43,8 +42,7 @@ var defs = {
   }
 }
 
-var dir = tmp.dirSync()
-var db = level(dir.name)
+var db = level('./db')
 var controller = Controller(db, defs)
 
 var drinksServed = 0;
@@ -164,7 +162,7 @@ function workerConnected(worker){
     connectedWorkers[worker].ready = false;
     connectedWorkers[worker].jobs = executables.jobs;
 
-    mqtt.publish(worker, JSON.stringify({status: 'new jobs', cocktails: executables}));
+    mqtt.publish(worker, JSON.stringify({status: 'new jobs', jobs: executables.jobs}));
     mqttToSocketIoEE.emit('queue update');
     mqttToSocketIoEE.emit('worker update', worker)
   });
@@ -208,7 +206,7 @@ app.get('/', function(req, res){
   res.sendFile(__dirname+'/views/index.html');
 });
 
-http.listen(3000, function(){
+http.listen(4000, function(){
   logging(chalk.yellow('listening on *:3000'));
 });
 
@@ -278,22 +276,3 @@ function logging(str){
   console.log(chalk.green(new Date().toString()), chalk.white(str));
 }
 
-controller.enqueue({
-  cocktail: 'spritz',
-  name: 'Matteo'
-}).enqueue({
-  cocktail: 'spritz',
-  name: 'Cian'
-}).enqueue({
-  cocktail: 'spritz',
-  name: 'Tammy'
-}).enqueue({
-  cocktail: 'bloody',
-  name: 'David'
-}).enqueue({
-  cocktail: 'bloody',
-  name: 'Richard'
-}).enqueue({
-  cocktail: 'vodka',
-  name: 'Glen'
-})
