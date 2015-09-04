@@ -4,27 +4,29 @@ var Controller = require('@matteo.collina/cocktail-control');
 var level = require('level')
 var tmp = require('tmp')
 var parallel = require('fastparallel')();
+var EE = require('events').EventEmitter;
+var mqttToSocketIoEE = new EE();
 
 var cocktails = {
   bloody: {
     activations: [
-      2000, // milleseconds
-      1000,
-      3000
+      {drink: 'vodka', time: 2000}, // milleseconds
+      {drink: 'rum', time: 1000},
+      {drink: 'coke', time: 4000}
     ]
   },
   spritz: {
     activations: [
-      4000, // milleseconds
-      8000,
-      12000
+      {drink: 'vodka', time: 4000}, // milleseconds
+      {drink: 'whiskey', time: 8000},
+      {drink: 'rum', time: 12000}
     ]
   },
   vodka: {
     activations: [
-     2000,
-     2000,
-     2000
+      {drink: 'vodka', time: 2000}, // milleseconds
+      {drink: 'vodka', time: 4000},
+      {drink: 'vodka', time: 2000}
     ]
   }
 }
@@ -45,46 +47,59 @@ var dir = tmp.dirSync()
 var db = level(dir.name)
 var controller = Controller(db, defs)
 
+var drinksServed = 0;
+
 var connectedWorkers = {};
+var pingInterval;
 
 mqtt.on('connect', function() {
   mqtt.subscribe('connections');
 
-  Object.keys(defs.workers).forEach(function(key, index){
-    mqtt.publish(key, JSON.stringify({status: 'ping'}));
-  });
+  ping();
+  pingInterval = setInterval(ping, 10000)
 
   logging(chalk.yellow('Server up!'));
 })
 
-mqtt.on('message', function(topic, message) {
+function ping(){
+  //only ping the defined workers
+  Object.keys(defs.workers).forEach(function(key){
+    mqtt.publish(key, JSON.stringify({status: 'ping'}));
+  });
+}
 
+mqtt.on('message', function(topic, message) {
   logging(chalk.blue('(topic: '+topic+') ') + chalk.white(message.toString()));
 
   message = JSON.parse(message);
 
   if      (topic === 'connections') handleConnectionsTopicMessages();
-  else if (topic === 'admin') handleAdminMessages();
   else    handleOtherTopic();
 
   // handle connection topic logic.
   // the connection topic is a topic for meta information that is only relevant for the server.
   function handleConnectionsTopicMessages(){
+    var worker = message.worker;
+
     if(message.status === 'worker here'){
-      if(!connectedWorkers[message.worker]) workerConnected(message.worker);
 
-      resetWorkerDisconnectTimeout(message.worker);
-    }
-  }
-
-  //handle admin topic logic
-  function handleAdminMessages(){
-    if(message.status === 'button press'){
-      if(connectedWorkers[message.worker] && connectedWorkers[message.worker].ready){
-        freeWorker(message.worker);
-      } else {
-        logging(chalk.red(chalk.bold('[ERROR] NOT READY TO FREE WORKER: ' + message.worker)));
+      // if worker not in the definitions
+      if(!defs.workers[worker]){
+        return;
       }
+
+      if(!connectedWorkers[worker]) workerConnected(worker);
+
+      if(!connectedWorkers[worker].ready && message.ready) {
+        logging(chalk.yellow('worker ('+worker+') is now ready for work.'));
+        connectedWorkers[worker].ready = true;
+        mqttToSocketIoEE.emit('worker update', worker)
+      }
+
+      connectedWorkers[worker].ready = message.ready;
+
+
+      resetWorkerDisconnectTimeout(worker);
     }
   }
 
@@ -92,25 +107,29 @@ mqtt.on('message', function(topic, message) {
   function handleOtherTopic(){
     var worker = topic;
 
-    if(!connectedWorkers[worker]) workerConnected(worker);
+    if(!defs.workers[worker]) return;
+
     resetWorkerDisconnectTimeout(worker);
 
-    if(message.status === 'ready'){
-      if(!connectedWorkers[worker].ready) logging(chalk.yellow('worker is now ready: ' + worker));
-      
-      connectedWorkers[worker].ready = true;
-    }
-    if(message.status === 'not ready'){
-      //wait
-    }
     if(message.status === 'mix ready'){
       var job = message.job;
-      logging(chalk.yellow('(ID: '+job.id+') Mix ready for ' + job.name + '. He ordered a ' + job.cocktail + '.'));
+      var msg = '(ID: '+job.id+') Mix ready for ' + job.name + '. They ordered a ' + job.cocktail + '.'
+
+      logging(chalk.yellow(msg));
+
+      drinksServed++;
+
+      connectedWorkers[worker].jobs.forEach(function(workersJob){
+        if(workersJob.id === job.id) workersJob = job;
+      });
+      mqttToSocketIoEE.emit('drink mixed', {worker: worker, message: msg})
     }
     if(message.status === 'button pressed'){
-      freeWorker(worker);
+      if(freeWorker(worker)) logging(chalk.yellow('Worker sent work successfully! (Worker: '+worker+')'));
+      else logging(chalk.red('failed to send worker work. (Worker: '+worker+')'));
     }
   }
+
 });
 
 // params: worker - String.
@@ -123,8 +142,11 @@ mqtt.on('message', function(topic, message) {
 // returns false if failure freeing.
 function freeWorker(worker){
   if(connectedWorkers[worker] && connectedWorkers[worker].ready){
-    logging(chalk.yellow('Freeing worker: ' + worker))
+    logging(chalk.yellow('assigning work to worker: ' + worker))
+
+    connectedWorkers[worker].jobs = [];
     controller.free(worker);
+
     return true;
   } 
   return false;
@@ -133,13 +155,18 @@ function freeWorker(worker){
 // method to handle logic of a worker connecting
 function workerConnected(worker){
   connectedWorkers[worker] = {};
+  connectedWorkers[worker].worker = defs.workers[worker];
 
   mqtt.subscribe(worker); // subscribe to the worker
   
   // controller emitted some jobs for the worker
   controller.on(worker, function(executables){
-    mqtt.publish(worker, JSON.stringify({status: 'new jobs', cocktails:executables}));
     connectedWorkers[worker].ready = false;
+    connectedWorkers[worker].jobs = executables.jobs;
+
+    mqtt.publish(worker, JSON.stringify({status: 'new jobs', cocktails: executables}));
+    mqttToSocketIoEE.emit('queue update');
+    mqttToSocketIoEE.emit('worker update', worker)
   });
 }
 
@@ -155,6 +182,97 @@ function resetWorkerDisconnectTimeout(worker){
     delete connectedWorkers[worker];
   }, 30000) 
 }
+
+function getAvailableDrinks(){
+  var availableDrinks = [];
+  Object.keys(connectedWorkers).forEach(function(worker){
+    if(connectedWorkers[worker].worker && connectedWorkers[worker].worker.cocktails){
+      connectedWorkers[worker].worker.cocktails.forEach(function(cocktail){
+        if(availableDrinks.indexOf(cocktail) < 0) availableDrinks.push(cocktail);
+      });
+    }
+  });
+  return availableDrinks;
+}
+
+
+var express = require('express');
+var app = express();
+var http = require('http').Server(app);
+var io = require('socket.io')(http);
+var path = require('path');
+
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/', function(req, res){
+  res.sendFile(__dirname+'/views/index.html');
+});
+
+http.listen(3000, function(){
+  logging(chalk.yellow('listening on *:3000'));
+});
+
+io.on('connection', function(socket){  
+  setImmediate(sendQueue);
+  setImmediate(sendAvailableDrinks);
+  setImmediate(sendCurrentWorkers);
+
+  socket.on('add drink to queue', function(job){
+    logging(chalk.yellow('adding a drink to the queue: ') + job.cocktail + '. for ' + job.name);
+    controller.enqueue(job)
+    sendQueue();
+  });
+
+  socket.on('get queue', sendQueue);
+  socket.on('get available drinks', sendAvailableDrinks);
+  socket.on('get current workers', sendCurrentWorkers);
+
+  mqttToSocketIoEE.on('drink mixed', drinkMixed);
+  mqttToSocketIoEE.on('worker update', updateWorker)
+  mqttToSocketIoEE.on('queue update', sendQueue);
+
+  function drinkMixed(obj){
+    updateWorker(obj.worker);
+
+    socket.emit('drinks served', drinksServed);
+    socket.emit('notification', {heading: 'Drink Ready!', message: obj.message});
+  }
+
+  function updateWorker(worker){
+    var workaholic = sendWorker(worker);
+
+    socket.emit('drinks served', drinksServed);
+
+    socket.emit('update worker', workaholic);
+  };
+
+  function sendQueue(){
+    socket.emit('current queue', controller.queue);
+  }
+
+  function sendAvailableDrinks(){
+    socket.emit('available drinks', getAvailableDrinks());
+  }
+
+  function sendCurrentWorkers(){
+    var workers = []
+
+    Object.keys(connectedWorkers).forEach(function(worker){
+      workers.push(sendWorker(worker));
+    });
+
+    socket.emit('current workers', workers);
+  }
+
+  function sendWorker(worker){
+    var workerToSend = {};
+    workerToSend.name = worker;
+    workerToSend.worker = connectedWorkers[worker].worker;
+    workerToSend.jobs = connectedWorkers[worker].jobs;
+    workerToSend.ready = connectedWorkers[worker].ready;
+    return workerToSend;
+  }
+});
 
 function logging(str){
   console.log(chalk.green(new Date().toString()), chalk.white(str));
@@ -179,23 +297,3 @@ controller.enqueue({
   cocktail: 'vodka',
   name: 'Glen'
 })
-
-var express = require('express');
-var app = express();
-var http = require('http').Server(app);
-var io = require('socket.io')(http);
-var path = require('path');
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.get('/', function(req, res){
-  res.sendFile(__dirname+'/views/index.html');
-});
-
-http.listen(3000, function(){
-  console.log('listening on *:3000');
-});
-
-io.on('connection', function(socket){
-  socket.emit('current queue', controller.queue);
-});

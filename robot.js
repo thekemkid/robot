@@ -23,12 +23,13 @@ var machines = [
   }
 ];
 
+var ready = false;
+
 initMachines();
 
 mqtt.subscribe(worker);
 
-sendStatus();
-var connectionsInterval = setInterval(sendStatus, 10000);
+ping();
 
 mqtt.on('message', function(topic, message) {
 
@@ -37,15 +38,11 @@ mqtt.on('message', function(topic, message) {
   message = JSON.parse(message.toString());
 
   if(message.status === 'new jobs') handleJobs(message.cocktails.jobs)
-  if(message.status === 'ping') sendStatus();
-  
+  if(message.status === 'ping') ping();
 });
 
-function sendStatus () {
-  mqtt.publish('connections', JSON.stringify({status: 'worker here', worker: worker}));
-
-  var stat = (machines.every(function machineReady(m) { return m.ready }) ? 'ready': 'not ready')
-  setTimeout(function(){mqtt.publish(worker, JSON.stringify({status: stat}))}, 50);
+function ping () {
+  mqtt.publish('connections', JSON.stringify({status: 'worker here', worker: worker, ready: ready}));
 }
 
 function handleJobs(jobs){
@@ -58,16 +55,21 @@ function handleJobs(jobs){
 
       jobs.forEach(function(job) {
         machines[job.pump].runJob(job, function(machine){
-          console.log('machine (' + machine.id + ') finished job:', job);
+
+          job.finished = true;
           mqtt.publish(worker, JSON.stringify({status: 'mix ready', job: job}))
+
+          console.log('machine (' + machine.id + ') finished job:', job);
+
           finishedJobs++;
         });
       });
 
-      when(function(){return finishedJobs === 2}, function(){
+      when(function(){return finishedJobs === jobs.length}, function(){
         console.log('machines for worker (' + worker + ') finished jobs:', jobs);
         
-        mqtt.publish(worker, JSON.stringify({worker: worker, status: 'ready'}));
+        ready = true;
+        ping();
       });
     }
   }
@@ -105,6 +107,7 @@ function initMachines() {
     }
 
     machine.runJob = function(job, cb) {
+      ready = false;
       var machine = this;
 
       machine.ready = false;
@@ -121,7 +124,7 @@ function initMachines() {
         setTimeout(function() {
           pin.low();
           finished++;
-        }, job.activations[index])
+        }, job.activations[index].time)
       })
 
       when(function(){return finished === 3;}, function(){
@@ -130,4 +133,6 @@ function initMachines() {
       })
     }
   })
+
+  ready = true;
 }
