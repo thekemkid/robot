@@ -11,9 +11,11 @@
   "dependencies": {
     "": "git://github.com/mcollina/cocktail-control.git",
     "chalk": "^1.1.1",
+    "express": "^4.13.3",
     "fastparallel": "^1.6.1",
     "level": "^1.3.0",
     "mqtt": "^1.3.5",
+    "socket.io": "^1.3.6",
     "tmp": "0.0.27",
     "when-conditional": "^2.0.0"
   }

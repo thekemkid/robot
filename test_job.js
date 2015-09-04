@@ -54,7 +54,7 @@ mqtt.on('connect', function() {
     mqtt.publish(key, JSON.stringify({status: 'ping'}));
   });
 
-  logging('Server up!')
+  logging(chalk.yellow('Server up!'));
 })
 
 mqtt.on('message', function(topic, message) {
@@ -63,9 +63,12 @@ mqtt.on('message', function(topic, message) {
 
   message = JSON.parse(message);
 
-  if(topic === 'connections') handleConnectionsTopicMessages();
-  else handleOtherTopic();
+  if      (topic === 'connections') handleConnectionsTopicMessages();
+  else if (topic === 'admin') handleAdminMessages();
+  else    handleOtherTopic();
 
+  // handle connection topic logic.
+  // the connection topic is a topic for meta information that is only relevant for the server.
   function handleConnectionsTopicMessages(){
     if(message.status === 'worker here'){
       if(!connectedWorkers[message.worker]) workerConnected(message.worker);
@@ -74,6 +77,18 @@ mqtt.on('message', function(topic, message) {
     }
   }
 
+  //handle admin topic logic
+  function handleAdminMessages(){
+    if(message.status === 'button press'){
+      if(connectedWorkers[message.worker] && connectedWorkers[message.worker].ready){
+        freeWorker(message.worker);
+      } else {
+        logging(chalk.red(chalk.bold('[ERROR] NOT READY TO FREE WORKER: ' + message.worker)));
+      }
+    }
+  }
+
+  // handle topics for workers.
   function handleOtherTopic(){
     var worker = topic;
 
@@ -81,20 +96,41 @@ mqtt.on('message', function(topic, message) {
     resetWorkerDisconnectTimeout(worker);
 
     if(message.status === 'ready'){
-      logging('worker ('+worker+') is ready');
-      setTimeout(function(){
-        controller.free(worker);
-      }, 1456);
+      if(!connectedWorkers[worker].ready) logging(chalk.yellow('worker is now ready: ' + worker));
+      
+      connectedWorkers[worker].ready = true;
     }
     if(message.status === 'not ready'){
       //wait
     }
+    if(message.status === 'mix ready'){
+      var job = message.job;
+      logging(chalk.yellow('(ID: '+job.id+') Mix ready for ' + job.name + '. He ordered a ' + job.cocktail + '.'));
+    }
     if(message.status === 'button pressed'){
-      controller.free(worker);
+      freeWorker(worker);
     }
   }
 });
 
+// params: worker - String.
+//
+// worker is a string of a workerID. 
+//
+// A worker will only be freed if it is connected and ready
+//
+// returns true if successfully freed worker.
+// returns false if failure freeing.
+function freeWorker(worker){
+  if(connectedWorkers[worker] && connectedWorkers[worker].ready){
+    logging(chalk.yellow('Freeing worker: ' + worker))
+    controller.free(worker);
+    return true;
+  } 
+  return false;
+}
+
+// method to handle logic of a worker connecting
 function workerConnected(worker){
   connectedWorkers[worker] = {};
 
@@ -102,17 +138,19 @@ function workerConnected(worker){
   
   // controller emitted some jobs for the worker
   controller.on(worker, function(executables){
-    mqtt.publish(worker, JSON.stringify({status: 'new jobs', jobs:executables}));
+    mqtt.publish(worker, JSON.stringify({status: 'new jobs', cocktails:executables}));
+    connectedWorkers[worker].ready = false;
   });
 }
 
+// method to handle logic of a user timing out
 function resetWorkerDisconnectTimeout(worker){
   if(connectedWorkers[worker].disconnectTimeout){
     clearTimeout(connectedWorkers[worker].disconnectTimeout);
   }
 
   connectedWorkers[worker].disconnectTimeout = setTimeout(function(){
-    logging(chalk.red('Worker disconnected:') + worker);
+    logging(chalk.red('Worker disconnected: ' + worker));
     mqtt.unsubscribe(worker);
     delete connectedWorkers[worker];
   }, 30000) 
@@ -137,4 +175,27 @@ controller.enqueue({
 }).enqueue({
   cocktail: 'bloody',
   name: 'Richard'
+}).enqueue({
+  cocktail: 'vodka',
+  name: 'Glen'
 })
+
+var express = require('express');
+var app = express();
+var http = require('http').Server(app);
+var io = require('socket.io')(http);
+var path = require('path');
+
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/', function(req, res){
+  res.sendFile(__dirname+'/views/index.html');
+});
+
+http.listen(3000, function(){
+  console.log('listening on *:3000');
+});
+
+io.on('connection', function(socket){
+  socket.emit('current queue', controller.queue);
+});

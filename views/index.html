@@ -1,0 +1,55 @@
+<!doctype html>
+<html ng-app="helloApp">
+  <head>
+    <title>Mixer app</title>
+    <link rel="stylesheet" href="/assets/bootstrap.min.css">
+    <link rel="stylesheet" href="/assets/custom.css">
+
+    <script type="text/javascript" src="/assets/jquery.min.js"></script>
+    <script type="text/javascript" src="/assets/jqueryui.min.js"></script>
+    <script type="text/javascript" src="/assets/angular.min.js"></script>
+    <script type="text/javascript" src="/assets/angularui.min.js"></script>
+    <script type="text/javascript" src="/assets/bootstrap.min.js"></script>
+    <script type="text/javascript" src="/socket.io/socket.io.js"></script>
+    <script type="text/javascript" src="/assets/mainPage.js"></script>
+
+
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  </head>
+  <body ng-controller="MixerCtrl">
+    <div class="jumbotron" ng-show='notifications.length > 0'>
+      <ul ng-repeat="notification in notifications" class='notification'>
+        <li>
+          <div class="panel panel-warning">
+            <div class="panel-heading">{{notification.heading}}</div>
+            <div class="panel-body">{{notification.message}}</div>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <div class="container col-sm-12" id="mainContent">
+      <div class='panel panel-default'>
+        <div class='panel-heading'>
+          <h3 class="panel-title">
+            <a role="button" data-toggle="collapse" data-target="#currentMixingQueue">
+              Current mixxing queue
+            </a>
+          </h3>
+        </div>
+        <div id="currentMixingQueue" class='panel-collapse collapse in' style="max-height: 500px;overflow-y:scroll;">
+          <div class="panel-body">
+            <ul ng-repeat="job in queue">
+              <li>
+                (id: {{job.id}}) Drink for {{job.name}}. Drink: {{job.cocktail}}
+              </li>
+            </ul>
+            <div ng-show="queue.length <= 1"><h4>Nothing queued!</h4></div>
+            <p>You can add more drinks to the queue using the form below.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </body>
+</html>

@@ -27,10 +27,8 @@ initMachines();
 
 mqtt.subscribe(worker);
 
-mqtt.publish('connections', JSON.stringify({status: 'worker here', worker: worker}));
-var connectionsInterval = setInterval(function(){
-  mqtt.publish('connections', JSON.stringify({status: 'worker here', worker: worker}));
-}, 10000);
+sendStatus();
+var connectionsInterval = setInterval(sendStatus, 10000);
 
 mqtt.on('message', function(topic, message) {
 
@@ -38,10 +36,17 @@ mqtt.on('message', function(topic, message) {
 
   message = JSON.parse(message.toString());
 
-  if(message.status === 'new jobs') handleJobs(message.jobs)
-  if(message.status === 'ping') mqtt.publish('connections', JSON.stringify({status: 'worker here', worker: worker}));
+  if(message.status === 'new jobs') handleJobs(message.cocktails.jobs)
+  if(message.status === 'ping') sendStatus();
   
 });
+
+function sendStatus () {
+  mqtt.publish('connections', JSON.stringify({status: 'worker here', worker: worker}));
+
+  var stat = (machines.every(function machineReady(m) { return m.ready }) ? 'ready': 'not ready')
+  setTimeout(function(){mqtt.publish(worker, JSON.stringify({status: stat}))}, 50);
+}
 
 function handleJobs(jobs){
   if (jobs) {
@@ -52,7 +57,9 @@ function handleJobs(jobs){
       var finishedJobs = 0;
 
       jobs.forEach(function(job) {
-        machines[job.pump].runJob(job, function(){
+        machines[job.pump].runJob(job, function(machine){
+          console.log('machine (' + machine.id + ') finished job:', job);
+          mqtt.publish(worker, JSON.stringify({status: 'mix ready', job: job}))
           finishedJobs++;
         });
       });
@@ -119,8 +126,7 @@ function initMachines() {
 
       when(function(){return finished === 3;}, function(){
         machine.ready = true
-        console.log('machine (' + machine.id + ') finished job:', job);
-        cb();
+        cb(machine);
       })
     }
   })
